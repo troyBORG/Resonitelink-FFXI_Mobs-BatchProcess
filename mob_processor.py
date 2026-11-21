@@ -14,7 +14,7 @@ PREFIX = '[FrooxEngine]FrooxEngine.'
 SKIN = PREFIX + 'SkinnedMeshRenderer'
 TOON = PREFIX + 'XiexeToonMaterial'
 REFERENCE = 'ROM_375_102-Original-Idle.glb'
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 # Recorded Culling Off recipe; private pilot captures are not distributed.
 # No texture or scene identifiers are embedded in the recipe.
 RECORDED_RECIPE = {'componentType': TOON, 'members': {
@@ -125,18 +125,6 @@ def apply_operations(link, operations):
             after = current
         results.append({'path':op['path'],'renderer':after,'material_mapping':mapping})
     return results
-
-
-def attribute(link, root):
-    import uuid
-    if any(c['componentType']==PREFIX+'AI_GeneratedContent' for c in root.get('components') or []):
-        return None
-    cid='MobProcessor_credit_'+uuid.uuid4().hex
-    link.req('addComponent',containerSlotId=root['id'],data={'id':cid,'componentType':PREFIX+'AI_GeneratedContent','members':{'Source':{'$type':'string','value':'Jorden / Hermes Agent'}}})
-    c=link.req('getComponent',componentId=cid)['data']
-    if c['members']['Source']['value']!='Jorden / Hermes Agent':
-        raise RuntimeError('Attribution readback failed')
-    return c
 
 
 def check_parent(slot):
@@ -280,7 +268,7 @@ def main(argv=None):
             else:
                 indices=select_indices(args.select if args.select is not None else input('Select indices or all (no default): '),len(roots))
             definitions={}
-            for typ in [SKIN,PREFIX+'MeshRenderer',TOON,PREFIX+'AI_GeneratedContent']:
+            for typ in [SKIN,PREFIX+'MeshRenderer',TOON]:
                 definitions[typ]=link.req('getComponentDefinition',componentType=typ)['definition']
             save('reflection.json',definitions)
             verify_merge(definitions[PREFIX+'MeshRenderer'])
@@ -296,10 +284,6 @@ def main(argv=None):
                     delta={k:{'before':clean(source['members'].get(k)),'after':v} for k,v in desired.items() if clean(source['members'].get(k))!=v}
                     print('  clone source material locally, preserve all source texture references/tints; changes:',json.dumps(delta,sort_keys=True))
             print(f'Preview: {len(indices)} selected imports; {len(operations)} renderer operations. Reference is excluded.')
-            changed_roots=[obs['scene'] for obs in selected if make_plan(obs['scene'],obs['materials'],refmat)]
-            for root in changed_roots:
-                if not any(c['componentType']==PREFIX+'AI_GeneratedContent' for c in root.get('components') or []):
-                    print('  add automation attribution to import root:',root['name']['value'],'(original artwork remains Square Enix)')
             if not args.apply:
                 print('DRY RUN: no world writes.');return 0
             if not operations:
@@ -316,7 +300,6 @@ def main(argv=None):
                     raise ValueError('Selected import changed since preview; restart')
             link.allow_writes=True  # Only after --apply, typed APPLY, and revalidation.
             result=apply_operations(link,operations);save('results.json',result)
-            save('attribution.json',[attribute(link,root) for root in changed_roots])
             after=[snapshot(link,roots[i]) for i in indices];save('after.json',after)
             remaining=[op for obs in after for op in make_plan(obs['scene'],obs['materials'],refmat)]
             if remaining:raise RuntimeError('Post-apply plan is not empty; stopped')

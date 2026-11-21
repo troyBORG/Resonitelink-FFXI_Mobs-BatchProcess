@@ -49,6 +49,8 @@ class ReusableBatchTests(unittest.TestCase):
             with patch.object(m,'Link',ReadOnlyFixture), patch('sys.stdout',new_callable=io.StringIO) as out, patch('builtins.input',side_effect=AssertionError('Unexpected prompt') if confirmation is None else None,return_value=confirmation):
                 code = m.main(['--host','unused','--port','12345','--catalog-dir',str(catalog),'--select','all','--output-dir',tmp,*extra])
             self.assertEqual(code, 0)
+            self.assertNotIn('automation attribution', out.getvalue())
+            self.assertNotIn(m.PREFIX+'AI_GeneratedContent', [kw['componentType'] for typ,kw in calls if typ == 'getComponentDefinition'])
             self.assertIn('DRY RUN' if confirmation is None else 'Cancelled',out.getvalue())
             plans = list(Path(tmp).glob('run-*/plan.json'))
             if '--refresh-reference' in extra:

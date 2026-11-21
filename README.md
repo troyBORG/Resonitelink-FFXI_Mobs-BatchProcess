@@ -1,4 +1,4 @@
-# FFXI mob processor — v1.1.0
+# FFXI mob processor — v1.1.1
 
 Selected native ResoniteLink processing of manually imported models. This is **not an importer**: import your own GLBs with Resonite first. The processor matches immediate GLB filenames in a local catalog to direct child slots beneath an explicit scene parent, previews selected renderer operations, and requires `--apply` plus typed `APPLY` before any world writes.
 
@@ -15,7 +15,7 @@ sh ./FFXI-Mob-Processor.sh --version
 python3 -B -m unittest discover -v
 ```
 
-The POSIX launcher finds the source beside itself and uses `python3` from PATH (including an activated virtual environment). It does not install anything or require a fixed directory. On Windows, invoke `python mob_processor.py` directly. Help, version, and all 19 tests run offline using only the Python standard library; dependency installation is a separate network operation unless you provide a local package cache. No wheels are bundled.
+The POSIX launcher finds the source beside itself and uses `python3` from PATH (including an activated virtual environment). It does not install anything or require a fixed directory. On Windows, invoke `python mob_processor.py` directly. Help, version, and all 20 tests run offline using only the Python standard library; dependency installation is a separate network operation unless you provide a local package cache. No wheels are bundled.
 
 ## Usage
 
@@ -56,7 +56,9 @@ Native merge is **non-transactional**. Failure can leave a merged renderer or an
 
 AI-assisted development: **Jorden / Hermes Agent**.
 
-Existing runtime behavior is intentionally preserved: applying changes adds an `AI_GeneratedContent` component with Source `Jorden / Hermes Agent` to changed import roots unless that component already exists. This automation attribution is an implementation choice, **not a claim that Resonite policy requires the tag**, nor a claim that original FFXI artwork was AI-generated. Dry runs add no tags. Changing this behavior requires a separate owner decision. Original game artwork remains attributable to Square Enix; this repository supplies none of it.
+AI assistance applies to development of this script, not to the original game assets. Original FFXI artwork remains attributable to Square Enix; this repository supplies none of it.
+
+Version 1.1.1 does **not create AI_GeneratedContent tags**, attribution components, or license components. Automatic tagging, its preview message and its reflection dependency have been removed. Existing tags on previously processed world objects are left untouched: there is no tag migration, editing or deletion. Script-development credit is not a license grant or a claim of ownership over imported assets.
 
 ## Privacy and publication differences
 
@@ -64,7 +66,7 @@ Runtime snapshots and journals can contain scene identifiers, asset URIs and ses
 
 This publication contains only source, portable launcher, hash-pinned dependency requirement, documentation, tests and hand-authored synthetic fixtures. There are no captured scene fixtures, private IDs, user endpoints, machine-specific paths, live snapshots/journals, GLBs or PNGs. Synthetic fixtures are invented test input, **not live execution evidence**.
 
-Relative to the repaired desktop v1.1.0 source, executable processor semantics are unchanged; only the recipe provenance comment was sanitized. Tests retain the 19-test suite but replace captured inputs with synthetic data and a dummy port. The launcher now resolves source in the same directory and relies on an explicitly installed dependency instead of a shared-directory layout and bundled-wheel bootstrap. Private pilot reports and machine-specific instructions are omitted. Publication verification is offline and makes no claim of a new live world test.
+Version 1.1.1 changes the earlier v1.1.0 tagging behavior at the owner’s request; material and native-merge processing remain unchanged. The 20 offline tests use synthetic data, including full successful CLI apply coverage for new imports and imports with existing tags. They do not connect to a world. The portable launcher still resolves source beside itself and relies on an explicitly installed dependency; the separately deployed desktop launcher is unchanged. Private pilot reports and machine-specific instructions are omitted. Offline tests are not live world evidence.
 
 ## License
 

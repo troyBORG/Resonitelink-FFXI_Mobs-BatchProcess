@@ -29,15 +29,6 @@ class PlanTests(unittest.TestCase):
   self.assertEqual(m.make_plan(scene,mats,ref),[])
 
 class RuntimeTests(unittest.TestCase):
- def test_attribution_readback(self):
-  class Fake:
-   def req(self,t,**kw):
-    if t=='addComponent':self.data=kw['data'];return {'success':True}
-    if t=='getComponent':return {'data':self.data}
-  f=Fake();root={'id':'root','components':[]}
-  c=m.attribute(f,root)
-  self.assertEqual(c['members']['Source']['value'],'Jorden / Hermes Agent')
-  self.assertEqual(m.attribute(f,{'id':'root','components':[c]}),None)
  def test_apply_uses_native_merge_and_does_not_repeat(self):
   import copy
   r={'id':'r','componentType':m.SKIN,'members':{'Materials':{'$type':'list','elements':[{'$type':'reference','targetId':'mat'}]*3},'Mesh':{'$type':'reference','targetId':'old'},'Bones':{'$type':'list','elements':[{'targetId':'bone'}]}}}
