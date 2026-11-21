@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.glb
+*.png
+*.json
+*.jsonl
+evidence/
+live-evidence/
+repair-evidence/
+backups/
+run-*/
+.env
