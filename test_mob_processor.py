@@ -9,8 +9,10 @@ class SafetyTests(unittest.TestCase):
    with self.assertRaises(ValueError):m.select_indices(bad,3)
 
 class PlanTests(unittest.TestCase):
- def test_reference_is_never_planned(self):
-  with self.assertRaises(ValueError):m.make_plan({'name':{'value':m.REFERENCE}}, {}, {})
+ def test_former_reference_is_planned_normally(self):
+  from synthetic_fixtures import batch
+  scene,mats,ref=batch(); scene['name']['value']=m.REFERENCE
+  self.assertEqual(len(m.make_plan(scene,mats,ref)),1)
  def test_synthetic_fixture_plan_preserves_source_and_second_pass(self):
   from synthetic_fixtures import batch
   scene,mats,ref=batch()
@@ -94,9 +96,10 @@ class AdditionalSafetyTests(unittest.TestCase):
   src['members']['NormalMap']['targetId']='own normal'
   src['members']['Culling']['value']='Back'
   wanted=m.desired_material(src,ref)
-  for k in ['MainTexture','Color','BlendMode','AlphaClip','NormalMap']:
+  for k in ['MainTexture','Color','AlphaClip','NormalMap']:
    self.assertEqual(wanted[k],m.clean(src['members'][k]))
   self.assertEqual(wanted['Culling']['value'],'Off')
+  self.assertEqual(wanted['BlendMode']['value'],'Opaque')
   src['componentType']=m.PREFIX+'PBS_Metallic'
   with self.assertRaises(ValueError):m.desired_material(src,ref)
  def test_truncated_or_avatar_hierarchy_is_rejected(self):

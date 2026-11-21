@@ -11,8 +11,10 @@ from synthetic_fixtures import batch
 
 
 class NoTagsTests(unittest.TestCase):
-    def run_apply(self, legacy=False):
+    def run_apply(self, legacy=False, former_reference=False):
         scene, materials, _ = batch()
+        materials['synthetic-material']['members']['BlendMode']['value']='Cutout'
+        if former_reference: scene["name"]["value"] = m.REFERENCE
         tag = {'id': 'synthetic-legacy-tag', 'componentType': m.PREFIX+'AI_GeneratedContent',
                'members': {'Source': {'$type': 'string', 'value': 'existing owner text'}}}
         if legacy:
@@ -58,6 +60,10 @@ class NoTagsTests(unittest.TestCase):
             with patch.object(m, 'Link', Fixture), patch('builtins.input', return_value='APPLY'), patch('sys.stdout', new_callable=io.StringIO) as out:
                 self.assertEqual(m.main(['--host','unused','--port','12345','--catalog-dir',str(catalog),'--select','all','--apply','--output-dir',tmp]), 0)
             receipt = json.loads(next(Path(tmp).glob('run-*/receipt.json')).read_text())
+            self.assertIn('BlendMode', out.getvalue())
+            self.assertIn('Opaque', out.getvalue())
+            bound=components[renderer['members']['Materials']['elements'][0]['targetId']]
+            self.assertEqual(bound['members']['BlendMode']['value'],'Opaque')
             self.assertEqual(receipt['renderer_operations'], 1)
             self.assertEqual(receipt['second_pass_operations'], 0)
             self.assertTrue(any(t == 'callSyncMethod' for t, _ in calls))
@@ -70,6 +76,9 @@ class NoTagsTests(unittest.TestCase):
             if legacy:
                 self.assertEqual(components[tag['id']], tag)
                 self.assertFalse(any(k.get('data', {}).get('id') == tag['id'] for t,k in calls if t != 'getComponent'))
+
+    def test_former_reference_included_in_normal_apply(self):
+        self.run_apply(former_reference=True)
 
     def test_successful_apply_creates_only_materials(self):
         self.run_apply()

@@ -14,11 +14,12 @@ PREFIX = '[FrooxEngine]FrooxEngine.'
 SKIN = PREFIX + 'SkinnedMeshRenderer'
 TOON = PREFIX + 'XiexeToonMaterial'
 REFERENCE = 'ROM_375_102-Original-Idle.glb'
-VERSION = '1.1.1'
-# Recorded Culling Off recipe; private pilot captures are not distributed.
+VERSION = '1.2.0'
+# Owner recipe: Culling Off and BlendMode Opaque; captures stay private.
 # No texture or scene identifiers are embedded in the recipe.
 RECORDED_RECIPE = {'componentType': TOON, 'members': {
-    'Culling': {'$type': 'enum', 'enumType': 'Culling', 'value': 'Off'}}}
+    'Culling': {'$type': 'enum', 'enumType': 'Culling', 'value': 'Off'},
+    'BlendMode': {'$type': 'enum', 'enumType': 'BlendMode', 'value': 'Opaque'}}}
 
 def clean(value):
     if isinstance(value, dict):
@@ -38,19 +39,17 @@ def desired_material(source, reference=RECORDED_RECIPE):
         raise ValueError('Only native XiexeToon imports are verified; other shader conversion is blocked')
     result = {k: clean(v) for k,v in source['members'].items()
               if not k.startswith('_') and k not in {'persistent','UpdateOrder','Enabled','HighPriorityIntegration'}}
-    expected = RECORDED_RECIPE['members']['Culling']
-    if clean(reference['members'].get('Culling')) != expected:
-        raise ValueError('Reference Culling is not the validated Off enum; refusing changed recipe')
-    culling = result.get('Culling', {})
-    if culling.get('$type') != 'enum' or culling.get('enumType') != 'Culling' or 'value' not in culling:
-        raise ValueError('Source Culling missing or incompatible; no guessed fields')
-    # Clone every source payload; Culling is the ONLY validated style override.
-    result['Culling'] = dict(expected)
+    # Clone every other source payload; only these two owner-approved overrides.
+    for field, expected in RECORDED_RECIPE['members'].items():
+        if clean(reference['members'].get(field)) != expected:
+            raise ValueError('Reference '+field+' differs from validated recipe')
+        current = result.get(field, {})
+        if not isinstance(current, dict) or current.get('$type') != 'enum' or current.get('enumType') != expected['enumType'] or 'value' not in current:
+            raise ValueError('Source '+field+' missing or incompatible; no guessed fields')
+        result[field] = dict(expected)
     return result
 
 def make_plan(scene, materials, reference):
-    if scene['name']['value'] == REFERENCE:
-        raise ValueError('Protected owner reference cannot be processed')
     plan = []
     for path,slot in walk(scene):
         if slot.get('isReferenceOnly'):
@@ -186,8 +185,39 @@ class Link:
 
 def snapshot(link, root):
     scene = link.req('getSlot',slotId=root['id'],depth=12,includeComponentData=True)['data']
-    if sum(1 for _ in walk(scene))>5000:
-        raise ValueError('Import hierarchy exceeds 5000-slot safety bound')
+    # Expand only boundary stubs encountered beneath this selected import.
+    # Every request stays depth-bounded; IDs, parent edges, cycles and total work
+    # are checked before any material reads or processing can occur.
+    stack = [(scene, 0, None)]
+    seen = set()
+    requests = 1
+    while stack:
+        node, depth, parent_id = stack.pop()
+        if depth > 128:
+            raise ValueError('Import hierarchy exceeds depth 128 safety bound')
+        sid = node.get('id')
+        if not sid or sid in seen:
+            raise ValueError('Hierarchy has missing/duplicate/cyclic slot identity')
+        seen.add(sid)
+        if len(seen) > 5000:
+            raise ValueError('Import hierarchy exceeds 5000-slot safety bound')
+        if node.get('isReferenceOnly'):
+            if requests >= 256:
+                raise ValueError('Hierarchy continuation exceeds 256-request safety bound')
+            expanded = link.req('getSlot',slotId=sid,depth=12,includeComponentData=True)['data']
+            requests += 1
+            if expanded.get('id') != sid or expanded.get('isReferenceOnly'):
+                raise ValueError('Hierarchy continuation incomplete or identity changed')
+            if parent_id is not None and expanded.get('parent',{}).get('targetId') != parent_id:
+                raise ValueError('Hierarchy continuation reparented outside observed edge')
+            if 'name' in node and expanded.get('name') != node['name']:
+                raise ValueError('Hierarchy continuation renamed')
+            node.clear(); node.update(expanded)
+        check_parent(node)
+        children = node.get('children') or []
+        if len(seen) + len(stack) + len(children) > 5000:
+            raise ValueError('Import hierarchy exceeds 5000-slot safety bound')
+        stack.extend((child, depth+1, sid) for child in reversed(children))
     renderers = [c for _,s in walk(scene) for c in s.get('components') or [] if c['componentType'] in {SKIN,PREFIX+'MeshRenderer'}]
     ids = set(x['targetId'] for r in renderers for x in r['members']['Materials']['elements'])
     if None in ids:
@@ -198,6 +228,56 @@ def snapshot(link, root):
     return {'scene':scene,'materials':mats,'mesh_providers':providers}
 
 
+def catalog_names(paths, max_files=100000):
+    """Recursively discover case-sensitive names, without directory symlink walks."""
+    import os
+    from pathlib import Path
+    paths = [Path(p).absolute() for p in paths]
+    for p in paths:
+        if any(part.is_symlink() for part in (p, *p.parents)):
+            raise ValueError('Catalog directory symlink is not allowed: '+str(p))
+    roots = sorted({p.resolve(strict=True) for p in paths}, key=lambda p: (len(p.parts), str(p)))
+    selected = []
+    for root in roots:
+        if root.is_file() and root.suffix.lower() != '.glb':
+            continue  # Shell Catalog/* also expands catalog README/metadata files.
+        if not root.is_dir():
+            raise ValueError('Catalog input must be a directory: '+str(root))
+        if not any(root.is_relative_to(parent) for parent in selected):
+            selected.append(root)
+    files = {}
+    hashes = {}
+    def digest(p):
+        import hashlib
+        canonical = p.resolve(strict=True)
+        if canonical not in hashes:
+            with canonical.open("rb") as stream:
+                hashes[canonical] = hashlib.file_digest(stream, "sha256").digest()
+        return hashes[canonical]
+    count = 0
+    def fail(error):
+        raise error
+    for root in selected:
+        for directory, dirs, names in os.walk(root, followlinks=False, onerror=fail):
+            dirs[:] = sorted(d for d in dirs if not (Path(directory)/d).is_symlink())
+            for name in sorted(names):
+                p = Path(directory)/name
+                if p.suffix.lower() != '.glb':
+                    continue
+                if not p.is_file():
+                    raise ValueError('Catalog GLB is not a regular file: '+str(p))
+                count += 1
+                if count > max_files:
+                    raise ValueError('Catalog exceeds discovered GLB limit: '+str(max_files))
+                if name in files and p.resolve(strict=True) != files[name].resolve(strict=True):
+                    if digest(p) != digest(files[name]):
+                        raise ValueError("Conflicting GLB filename: "+name)
+                files.setdefault(name, p)
+    if not files:
+        raise ValueError('Catalog contains no GLBs')
+    return set(files)
+
+
 def main(argv=None):
     import argparse, json, os, sys, time
     from pathlib import Path
@@ -205,10 +285,10 @@ def main(argv=None):
     ap.add_argument('--version',action='version',version=VERSION)
     ap.add_argument('--host',required=True,help='Link host; desktop local IPv6 listener: ::1')
     ap.add_argument('--port',required=True,type=int)
-    ap.add_argument('--catalog-dir',required=True,type=Path,help='Immediate GLB filenames allowlist; no asset upload')
+    ap.add_argument('--catalog-dir',required=True,type=Path,nargs='+',action='extend',help='One or more recursive catalog directories; repeatable, shell globs supported; no asset upload')
     ap.add_argument('--parent-path',default='Root',help='Exact slash-separated slot path, unique at each level')
-    ap.add_argument('--reference',default=REFERENCE)
-    ap.add_argument('--refresh-reference',action='store_true',help='Read-only capture of one exact reference; validates only recorded Culling Off, saves evidence and exits without processing')
+    ap.add_argument('--reference',default=REFERENCE,help='Exact name used only by --refresh-reference; no normal-batch exclusion')
+    ap.add_argument('--refresh-reference',action='store_true',help='Read-only capture of one exact reference; validates recorded Culling Off and BlendMode Opaque, saves evidence and exits without processing')
     ap.add_argument('--select',help='Explicit displayed indices (1,3) or all; omitted prompts')
     ap.add_argument('--select-name',help='One exact candidate name instead of displayed indices')
     ap.add_argument('--dry-run',action='store_true',help='Read-only preview (default unless --apply)')
@@ -219,8 +299,7 @@ def main(argv=None):
     if args.apply and args.dry_run:ap.error('--apply and --dry-run conflict')
     if args.apply and args.refresh_reference:ap.error('--refresh-reference cannot be combined with --apply')
     if args.select and args.select_name:ap.error('choose --select or --select-name')
-    names={p.name for p in args.catalog_dir.iterdir() if p.is_file() and p.suffix.lower()=='.glb'}
-    if not names or len(names)>200:raise ValueError('Catalog must contain 1..200 immediate GLBs')
+    names=catalog_names(args.catalog_dir)
     os.umask(0o077)
     run=args.output_dir/('run-'+str(time.time_ns()));run.mkdir(parents=True,exist_ok=False)
     def save(name,obj):
@@ -250,23 +329,22 @@ def main(argv=None):
                 for mat in reference['materials'].values():
                     desired_material(mat,mat)
                 save('recipe.json',RECORDED_RECIPE)
-                print('Reference captured; validated recorded Culling Off only. No recipe expansion. DRY RUN: no world writes.')
+                print('Reference captured; validated recorded Culling Off and BlendMode Opaque. No recipe expansion. DRY RUN: no world writes.')
                 return 0
-            roots=candidates(parent.get('children') or [],names-{REFERENCE,args.reference})
+            roots=candidates(parent.get('children') or [],names)
             refmat=RECORDED_RECIPE
             save('recipe.json',refmat)
-            observations=[]
             for index,root in enumerate(roots,1):
-                obs=snapshot(link,root);observations.append(obs)
-                rs=[c for _,s in walk(obs['scene']) for c in s.get('components') or [] if c['componentType'] in {SKIN,PREFIX+'MeshRenderer'}]
-                counts=[len(r['members']['Materials']['elements']) for r in rs]
-                print(f"[{index}] {args.parent_path}/{root['name']['value']} | renderers={len(rs)} skinned={sum(r['componentType']==SKIN for r in rs)} material slots={counts}")
+                print(f"[{index}] {args.parent_path}/{root['name']['value']}")
             if not roots:raise ValueError('No candidate siblings')
             if args.select_name:
                 indices=[i for i,s in enumerate(roots) if s['name']['value']==args.select_name]
                 if len(indices)!=1:raise ValueError('Selected name missing/ambiguous')
             else:
                 indices=select_indices(args.select if args.select is not None else input('Select indices or all (no default): '),len(roots))
+            if not 1 <= len(indices) <= 200:
+                raise ValueError("Select 1..200 live imports per batch; narrow --select or --parent-path")
+            observations={i:snapshot(link,roots[i]) for i in indices}
             definitions={}
             for typ in [SKIN,PREFIX+'MeshRenderer',TOON]:
                 definitions[typ]=link.req('getComponentDefinition',componentType=typ)['definition']
@@ -283,7 +361,7 @@ def main(argv=None):
                     source=next(obs['materials'][mid] for obs in selected if mid in obs['materials'])
                     delta={k:{'before':clean(source['members'].get(k)),'after':v} for k,v in desired.items() if clean(source['members'].get(k))!=v}
                     print('  clone source material locally, preserve all source texture references/tints; changes:',json.dumps(delta,sort_keys=True))
-            print(f'Preview: {len(indices)} selected imports; {len(operations)} renderer operations. Reference is excluded.')
+            print(f'Preview: {len(indices)} selected imports; {len(operations)} renderer operations.')
             if not args.apply:
                 print('DRY RUN: no world writes.');return 0
             if not operations:
@@ -303,7 +381,7 @@ def main(argv=None):
             after=[snapshot(link,roots[i]) for i in indices];save('after.json',after)
             remaining=[op for obs in after for op in make_plan(obs['scene'],obs['materials'],refmat)]
             if remaining:raise RuntimeError('Post-apply plan is not empty; stopped')
-            save('receipt.json',{'selected':[roots[i]['name']['value'] for i in indices],'renderer_operations':len(operations),'second_pass_operations':len(remaining),'reference_mode':'recorded recipe; no live reference read or written','visual_validation':'owner pending','session':session})
+            save('receipt.json',{'selected':[roots[i]['name']['value'] for i in indices],'renderer_operations':len(operations),'second_pass_operations':len(remaining),'reference_mode':'recorded recipe; reference name is not excluded from selection','visual_validation':'owner pending','session':session})
             print('VERIFIED: native merge/material readbacks and empty second-pass plan. Visual/animation/save-reload checks remain owner-side.')
             return 0
     finally:

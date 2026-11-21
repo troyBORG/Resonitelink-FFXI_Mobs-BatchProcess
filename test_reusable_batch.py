@@ -11,7 +11,7 @@ import mob_processor as m
 BASE = Path(__file__).parent
 
 class ReusableBatchTests(unittest.TestCase):
-    def run_batch(self, state, extra=(), confirmation=None):
+    def run_batch(self, state, extra=(), confirmation=None, many=False):
         from synthetic_fixtures import batch
         scene, materials, reference = batch()
         root = {'id': scene['id'], 'name': scene['name']}
@@ -20,6 +20,8 @@ class ReusableBatchTests(unittest.TestCase):
         if state == 'present': children += [ref]
         if state == 'duplicates': children += [ref, {**ref, 'id': 'duplicate'}]
         if state == 'moved': children += [{'id':'elsewhere','name':{'value':'Elsewhere'},'children':[ref]}]
+        if many:
+            children.extend({"id":f"extra-{i}","name":{"value":f"Extra{i}.glb"}} for i in range(201))
         calls = []
         class ReadOnlyFixture:
             def __init__(self, *args): pass
@@ -44,10 +46,14 @@ class ReusableBatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             catalog = Path(tmp)/'catalog'; catalog.mkdir()
             (catalog/scene['name']['value']).touch()
-            # Reference filename in allowlist must not make duplicate references candidates.
-            (catalog/m.REFERENCE).touch()
+            # Unlisted reference siblings do not affect ordinary batches.
+            if '--refresh-reference' in extra: (catalog/m.REFERENCE).touch()
+            if many:
+                for i in range(201): (catalog/f'Extra{i}.glb').touch()
+            second = Path(tmp)/'second'; second.mkdir()
+            (second/'Unimported.glb').touch()
             with patch.object(m,'Link',ReadOnlyFixture), patch('sys.stdout',new_callable=io.StringIO) as out, patch('builtins.input',side_effect=AssertionError('Unexpected prompt') if confirmation is None else None,return_value=confirmation):
-                code = m.main(['--host','unused','--port','12345','--catalog-dir',str(catalog),'--select','all','--output-dir',tmp,*extra])
+                code = m.main(['--host','unused','--port','12345','--catalog-dir',str(catalog),str(second),'--catalog-dir',str(catalog),'--select','all','--output-dir',tmp,*extra])
             self.assertEqual(code, 0)
             self.assertNotIn('automation attribution', out.getvalue())
             self.assertNotIn(m.PREFIX+'AI_GeneratedContent', [kw['componentType'] for typ,kw in calls if typ == 'getComponentDefinition'])
@@ -64,6 +70,13 @@ class ReusableBatchTests(unittest.TestCase):
         for state in ('absent','moved','duplicates'):
             with self.subTest(state=state): self.run_batch(state)
 
+    def test_selected_limit_before_scene_reads(self):
+        with self.assertRaisesRegex(ValueError, "200"):
+            self.run_batch("absent", many=True)
+
+    def test_unselected_subtrees_not_read(self):
+        self.run_batch("absent", ["--select", "202"], many=True)
+
     def test_explicit_dry_run_reference_absent(self):
         self.run_batch('absent', ['--dry-run'])
 
@@ -71,7 +84,7 @@ class ReusableBatchTests(unittest.TestCase):
         self.run_batch('absent',['--apply'],confirmation='no')
 
 class RecipeTests(unittest.TestCase):
-    def test_recipe_changes_only_culling_and_requires_source_field(self):
+    def test_recipe_changes_only_culling_blend_and_requires_source_fields(self):
         from synthetic_fixtures import material
         ref=material()
         src=copy.deepcopy(ref)
@@ -84,9 +97,27 @@ class RecipeTests(unittest.TestCase):
         ref['members']['ZOffsetFactor']={'$type':'float','value':0}
         wanted=m.desired_material(src,ref)
         for k,v in wanted.items():
-            if k!='Culling': self.assertEqual(v,m.clean(src['members'][k]))
+            if k not in {'Culling','BlendMode'}: self.assertEqual(v,m.clean(src['members'][k]))
+        self.assertEqual(wanted['BlendMode']['value'],'Opaque')
         del src['members']['Culling']
         with self.assertRaisesRegex(ValueError,'Culling'): m.desired_material(src,ref)
+
+    def test_cutout_off_changes_but_opaque_off_is_noop(self):
+        from synthetic_fixtures import batch
+        scene,mats,ref=batch()
+        renderer=scene['children'][0]['components'][0]
+        renderer['members']['Materials']['elements']=renderer['members']['Materials']['elements'][:1]
+        source=mats['synthetic-material']
+        source['members']['Culling']['value']='Off'
+        source['members']['BlendMode']['value']='Cutout'
+        plan=m.make_plan(scene,mats,ref)
+        self.assertEqual(len(plan),1)
+        self.assertFalse(plan[0]['merge'])
+        self.assertEqual(plan[0]['materials'][source['id']]['BlendMode']['value'],'Opaque')
+        source['members']['BlendMode']['value']='Opaque'
+        self.assertEqual(m.make_plan(scene,mats,ref),[])
+        del source['members']['BlendMode']
+        with self.assertRaisesRegex(ValueError,'BlendMode'): m.make_plan(scene,mats,ref)
 
     def test_readonly_transport_blocks_mutation_before_send(self):
         link=m.Link.__new__(m.Link)
