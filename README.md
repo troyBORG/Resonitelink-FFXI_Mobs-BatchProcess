@@ -1,10 +1,55 @@
-# FFXI mob processor — v1.2.0
+# FFXI Mobs · Batch Processor
 
-Selected native ResoniteLink processing of manually imported models. This is **not an importer**: import your own GLBs with Resonite first. The processor matches recursively discovered GLB filenames in one or more local catalogs to direct child slots beneath an explicit scene parent, previews selected renderer operations, and requires `--apply` plus typed `APPLY` before any world writes.
+**Import your models in Resonite. Pick a batch. Merge duplicate-material submeshes and fix the mob materials in one run.**
 
-## Install and offline checks
+A Python CLI for **ResoniteLink**—not a model importer, and no AI service is needed to run it.
 
-Requires Python 3.11+. Live connections additionally require `websocket-client`:
+- **Native merge:** calls Resonite’s `MergeByMaterial()`.
+- **Mob recipe:** XiexeToon → **Culling Off · Blend Mode Opaque**.
+- **Your textures stay yours:** preserves texture references, tints, UVs and other source settings.
+- **Repeatable:** already-correct models produce no changes.
+- **You choose:** select models, review the preview, then type `APPLY`.
+- **No automatic AI tags or license components.**
+
+> **Save your world first.** Native merging is not transactional; diagnostic snapshots are not backups. This version processes XiexeToon mob materials, not the separate PBS environment workflow.
+
+## Quick start
+
+Requires **Python 3.11+**, your own locally available GLB catalog, and ResoniteLink enabled in a session you are authorized to edit. Run these from this repository’s folder.
+
+Create the environment and install the pinned dependency—no shell activation required:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements.txt
+```
+
+Start with a read-only preview. Replace `YOUR_LINK_PORT` with the port currently displayed by Resonite; replace the catalog path and scene parent with yours:
+
+```sh
+.venv/bin/python mob_processor.py --host ::1 --port YOUR_LINK_PORT --catalog-dir ./Catalog --parent-path 'Root/My Batch' --select all --dry-run
+```
+
+To process models, replace `--select all --dry-run` with `--apply`. You’ll get an interactive numbered selection, a preview, and a final `APPLY` prompt. If your models are directly under `Root`, omit `--parent-path`.
+
+**Multiple families?** Both `--catalog-dir ./Catalog/aquan/*` and `--catalog-dir ./Catalog/*` work. Directory discovery is recursive; only matching models already present beneath the selected scene parent are candidates.
+
+```text
+Native import → Find matching slots → Select → Preview → APPLY
+                                                   ↓
+                                  Merge → Opaque + Culling Off
+                                                   ↓
+                                      Readback + no-op check
+```
+
+**Version: 1.2.0** · Expand the sections below for installation alternatives, flags, safety limits and troubleshooting.
+
+---
+
+<details>
+<summary><strong>📦 Installation alternatives & offline tests</strong></summary>
+
+Requires Python 3.11+. Live connections additionally require `websocket-client`. The activation example below is for **Bash/POSIX shells**; Fish users can use the activation-free Quick start above:
 
 ```sh
 python3 -m venv .venv
@@ -17,9 +62,12 @@ python3 -B -m unittest discover -v
 
 The POSIX launcher finds the source beside itself and uses `python3` from PATH (including an activated virtual environment). It does not install anything or require a fixed directory. On Windows, invoke `python mob_processor.py` directly. Help, version, and all 31 tests run offline using only the Python standard library; dependency installation is a separate network operation unless you provide a local package cache. No wheels are bundled.
 
-## Usage
+</details>
 
-Supply your own current ResoniteLink host and listening port. These shell variables are placeholders, not a saved user endpoint:
+<details>
+<summary><strong>🎛️ Selection, flags & multi-folder examples</strong></summary>
+
+Supply your own current ResoniteLink host and listening port. In the examples below, `$LINK_HOST` and `$LINK_PORT` must already be set in your shell; they are placeholders, not a saved endpoint. You can instead substitute literal values. Use the activated environment for the portable `sh` launcher, or invoke `.venv/bin/python mob_processor.py` directly as in Quick start:
 
 ```sh
 sh ./FFXI-Mob-Processor.sh --host "$LINK_HOST" --port "$LINK_PORT" \
@@ -57,7 +105,10 @@ sh ./FFXI-Mob-Processor.sh --host "$LINK_HOST" --port "$LINK_PORT" --catalog-dir
 
 The first two forms still prompt for explicit model selection and typed `APPLY`. A whole catalog is an allowlist, not permission to process every world object. `--parent-path` remains available to restrict the scene parent. If more than 200 models match, select a smaller subset; unselected model subtrees are not read.
 
-## Processing behavior and limits
+</details>
+
+<details>
+<summary><strong>🛠️ What changes—and what stays untouched</strong></summary>
 
 Deep rigs are read using depth-12 requests plus targeted continuation at observed reference-only child boundaries. Per selected import, discovery is limited to 5,000 slots, depth 128 and 256 slot requests. Continuation checks identity, parent edges, renamed slots and repeated IDs; unresolved stubs fail closed. No whole-world depth increase or mutation is used to fix truncation. These snapshots are sequential observations, not atomic world transactions.
 
@@ -67,7 +118,10 @@ Repeated material references are merged through native `MeshRenderer.MergeByMate
 
 Native merge is **non-transactional**. Failure can leave a merged renderer or an unattached material. There is no automatic rollback, reconnect, write replay or deletion. Inspect your scene and private journal before trying again. Bone-reference checks are not visual/animation validation. Visual appearance, animation and save/reload portability require your own verification. No avatar setup, AnimX generation, inventory saving or proprietary assets are included.
 
-## Attribution
+</details>
+
+<details>
+<summary><strong>🏷️ AI assistance, credits & tagging</strong></summary>
 
 AI-assisted development: **Jorden / Hermes Agent**.
 
@@ -75,7 +129,10 @@ AI assistance applies to development of this script, not to the original game as
 
 Version 1.2.0 does **not create AI_GeneratedContent tags**, attribution components, or license components. Automatic tagging, its preview message and its reflection dependency have been removed. Existing tags on previously processed world objects are left untouched: there is no tag migration, editing or deletion. Script-development credit is not a license grant or a claim of ownership over imported assets.
 
-## Privacy and publication differences
+</details>
+
+<details>
+<summary><strong>🔒 Privacy, test evidence & version history</strong></summary>
 
 Runtime snapshots and journals can contain scene identifiers, asset URIs and session data. Keep them private; do not commit them. They are diagnostics, not world backups or safe permanent-ID restore scripts.
 
@@ -83,6 +140,31 @@ This publication contains only source, portable launcher, hash-pinned dependency
 
 Version 1.1.1 changes the earlier v1.1.0 tagging behavior at the owner’s request; native-merge processing remains unchanged. Version 1.2.0 additionally supports recursive multi-folder catalogs, bounded deep rigs, normal selection of the former reference, and the owner-corrected Opaque blend recipe. The 31 offline tests use synthetic data, including full successful CLI apply coverage for new imports and imports with existing tags. They do not connect to a world. The portable launcher still resolves source beside itself and relies on an explicitly installed dependency; the separately deployed desktop launcher is unchanged. Private pilot reports and machine-specific instructions are omitted. Offline tests are not live world evidence.
 
-## License
+</details>
+
+<details>
+<summary><strong>📄 License & game-asset rights</strong></summary>
 
 No license grant is supplied in this publication pending the owner's license decision. Public availability alone is not an open-source license. Third-party dependencies retain their own licenses; no rights to game assets are granted.
+
+</details>
+
+<details>
+<summary><strong>🩺 Troubleshooting & finish checklist</strong></summary>
+
+- **Connection refused:** check ResoniteLink is enabled and use its current port. The port can change between sessions. `::1` is local IPv6; use the host on which your endpoint actually listens.
+- **No matching models:** disk filenames must match imported slot names exactly. Catalog discovery is recursive, but scene matching checks direct children of `--parent-path`, not every object in the world.
+- **Duplicate sibling names:** place batches beneath distinct parents and select one with `--parent-path`; the tool will not guess which duplicate you meant.
+- **Unsupported material:** only XiexeToon is supported. It does not convert PBS/environment materials.
+- **Hierarchy limit / changed state / merge timeout:** stop, inspect the printed evidence directory and scene, then investigate. Do not bypass checks or repeatedly apply while editing the models.
+- **Nothing changed:** without `--apply` this is a preview. `Already converged` means the selected models already match the recipe.
+- **Old AI tags remain:** this version neither adds nor removes tags. Existing tags require a separate deliberate cleanup.
+
+After a successful apply:
+
+- [ ] Check the models visually, including transparent-looking areas now set to Opaque.
+- [ ] Check animation and deformation.
+- [ ] Run another preview and confirm no further operations are proposed.
+- [ ] Save and respawn a representative model before treating the batch as portable.
+
+</details>
